@@ -551,7 +551,8 @@ export async function saveResponse(termId, responseData) {
       synonymRating: responseData.synonymRating || null,
       suggestedDefinition: responseData.suggestedDefinition || null,
       suggestedLabel: responseData.suggestedLabel || null,
-      suggestedSynonyms: responseData.suggestedSynonyms ? [responseData.suggestedSynonyms] : null
+      suggestedSynonyms: responseData.suggestedSynonyms ? [responseData.suggestedSynonyms] : null,
+      otherSuggestions: responseData.otherSuggestions || null
     }
     
     let result
