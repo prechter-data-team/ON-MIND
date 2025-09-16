@@ -194,6 +194,7 @@ const feedback = ref({
 })
 
 const selectedSynonyms = ref([])
+const defaultSynonyms = ref([])  // Add this for tracking default synonyms
 const validationErrors = ref([])
 const isSubmitting = ref(false)
 const hierarchyNodes = ref([])
@@ -232,7 +233,7 @@ const hierarchyTitle = computed(() => {
 
 // Function to build hierarchy tree from Airtable terms using nextTermLabel order
 const buildHierarchyFromTerms = (terms) => {
-  console.log('🏗️ Building hierarchy from terms:', terms)
+  console.log('Building hierarchy from terms:', terms)
   
   // Step 1: Find root terms (terms that don't have parents in the current survey)
   const termLabels = terms.map(t => t.termLabel)
@@ -241,7 +242,7 @@ const buildHierarchyFromTerms = (terms) => {
     return !term.parents || !termLabels.includes(term.parents)
   })
   
-  console.log('🌱 Root terms found:', rootTerms.map(t => t.termLabel))
+  console.log('Root terms found:', rootTerms.map(t => t.termLabel))
   
   // Step 2: Build the hierarchy recursively using nextTermLabel order
   const hierarchy = {}
@@ -250,7 +251,7 @@ const buildHierarchyFromTerms = (terms) => {
     hierarchy[rootTerm.termLabel] = buildChildrenInOrder(rootTerm, terms)
   })
   
-  console.log('🏗️ Built hierarchy:', hierarchy)
+  console.log('Built hierarchy:', hierarchy)
   return hierarchy
 }
 
@@ -266,7 +267,7 @@ const buildChildrenInOrder = (parentTerm, allTerms) => {
   // Sort children based on the order they appear in the parent's nextTermLabel
   const orderedChildren = sortChildrenByNextTermOrder(children, parentTerm, allTerms)
   
-  console.log(`📋 Children of "${parentTerm.termLabel}":`, orderedChildren.map(c => c.termLabel))
+  console.log(`Children of "${parentTerm.termLabel}":`, orderedChildren.map(c => c.termLabel))
   
   // Check if any children have their own children
   const childrenWithGrandchildren = orderedChildren.filter(child => {
@@ -301,7 +302,7 @@ const sortChildrenByNextTermOrder = (children, parentTerm, allTerms) => {
   
   // Build the survey flow chain starting from parent
   const surveyFlowOrder = buildSurveyFlowChain(allTerms)
-  console.log('🔗 Survey flow order:', surveyFlowOrder)
+  console.log('Survey flow order:', surveyFlowOrder)
   
   // Sort children based on their position in the survey flow
   const orderedChildren = [...children].sort((a, b) => {
@@ -390,6 +391,56 @@ const formatSynonyms = (synonyms) => {
   return synonyms
 }
 
+// Initialize synonyms from the current term
+const initializeSynonyms = async () => {
+  if (currentTerm.value?.synonyms && selectedSynonyms.value.length === 0) {
+    let synonymTexts = []
+    
+    if (Array.isArray(currentTerm.value.synonyms)) {
+      synonymTexts = currentTerm.value.synonyms.map(s => s.trim()).filter(s => s.length > 0)
+    } else if (typeof currentTerm.value.synonyms === 'string') {
+      synonymTexts = currentTerm.value.synonyms
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+    }
+    
+    // Look up real record IDs for these synonym texts
+    const synonymObjects = []
+    for (const text of synonymTexts) {
+      // Search for this synonym in the database
+      const foundSynonyms = await searchSynonyms(text)
+      const exactMatch = foundSynonyms.find(syn => 
+        (syn.synAndTypeDoNotDelete || syn.text || syn.synonymText || '').trim().toLowerCase() === text.toLowerCase()
+      )
+      
+      if (exactMatch) {
+        // Use the real record ID and mark as default
+        synonymObjects.push({
+          id: exactMatch.id,  // REAL RECORD ID
+          text: text,
+          isDefault: true,    // Mark as default synonym
+          isExisting: false,
+          isCustom: false
+        })
+      } else {
+        // Fallback to fake ID if not found in database
+        synonymObjects.push({
+          id: `term-synonym-${synonymObjects.length + 1}`,
+          text: text,
+          isDefault: true,    // Mark as default synonym
+          isExisting: false,
+          isCustom: false
+        })
+      }
+    }
+    
+    selectedSynonyms.value = synonymObjects
+    defaultSynonyms.value = [...synonymObjects]  // Store original defaults
+    console.log('Initialized synonyms with real IDs:', selectedSynonyms.value)
+  }
+}
+
 // Check if feedback box should be shown
 const showFeedbackBox = (category) => {
   return ratings.value[category] > 0 && ratings.value[category] <= 4
@@ -405,6 +456,56 @@ const updateRating = (category, value) => {
 const updateSelectedSynonyms = (synonyms) => {
   selectedSynonyms.value = synonyms
   validateForm()
+}
+
+// Function to determine what synonyms to send to API
+const getFilteredSynonymsToSend = (currentSynonyms, defaultSynonyms) => {
+  // Get IDs for easy comparison
+  const currentIds = new Set(currentSynonyms.map(syn => syn.id))
+  const defaultIds = new Set(defaultSynonyms.map(syn => syn.id))
+  
+  // Check if any default synonyms were removed
+  const defaultsRemoved = defaultSynonyms.some(defaultSyn => 
+    !currentIds.has(defaultSyn.id)
+  )
+  
+  if (defaultsRemoved) {
+    // If defaults were removed, send the complete final list
+    console.log('🔄 Default synonyms were removed - sending complete list')
+    return {
+      action: 'replace',
+      synonyms: currentSynonyms
+    }
+  } else {
+    // Only additions - send just the new ones (not defaults)
+    const newSynonyms = currentSynonyms.filter(synonym => 
+      !defaultIds.has(synonym.id)
+    )
+    
+    console.log('➕ Only additions detected - sending new synonyms only')
+    return {
+      action: 'add',
+      synonyms: newSynonyms
+    }
+  }
+}
+
+// Handle filtered synonym changes from SynonymSelector
+const handleSynonymsChanged = (filteredData) => {
+  console.log('Received filtered synonym changes:', filteredData)
+  
+  if (filteredData.action === 'replace') {
+    console.log('Complete synonym list replacement needed:', filteredData.synonyms)
+    // Handle complete replacement - this means defaults were removed
+    // You can store this info for when the form is submitted
+  } else if (filteredData.action === 'add') {
+    console.log('Only new synonyms to add:', filteredData.synonyms)
+    // Handle addition only - no defaults were removed
+    // You can store this info for when the form is submitted
+  }
+  
+  // You could store this in a ref to use during form submission
+  // For example: synonymChanges.value = filteredData
 }
 
 // Validate form
@@ -456,6 +557,21 @@ const submitFeedback = async () => {
   isSubmitting.value = true
   
   try {
+    // Determine what synonyms to send based on filtering logic
+    const synonymChanges = getFilteredSynonymsToSend(selectedSynonyms.value, defaultSynonyms.value)
+    
+    // Prepare the synonyms data based on the filtering result
+    let synonymsToSend
+    if (synonymChanges.action === 'replace') {
+      // Send all current synonyms (complete replacement)
+      synonymsToSend = selectedSynonyms.value.map(s => s.id)
+      console.log('📤 Sending complete synonym list:', synonymsToSend)
+    } else {
+      // Send only new synonyms (additions only)
+      synonymsToSend = synonymChanges.synonyms.map(s => s.id)
+      console.log('📤 Sending only new synonyms:', synonymsToSend)
+    }
+    
     // Prepare response data with ratings and feedback
     const responseData = {
       agreement: 'no', // This is a disagree response
@@ -465,7 +581,8 @@ const submitFeedback = async () => {
       synonymRating: ratings.value.synonym,
       suggestedDefinition: feedback.value.definition || null,
       suggestedLabel: feedback.value.termName || null,
-      suggestedSynonyms: selectedSynonyms.value.map(s => s.id).join(',') || null,
+      suggestedSynonyms: synonymsToSend.length > 0 ? synonymsToSend : null,
+      synonymAction: synonymChanges.action, // Include the action type for backend processing
       otherSuggestions: feedback.value.other || null,
       timestamp: new Date().toISOString()
     }
@@ -535,18 +652,20 @@ const updateHierarchy = () => {
   }, 100)
 }
 
-// Watch for current term changes
+// Watch for current term changes - MOVED TO AFTER ALL FUNCTION DEFINITIONS
 watch(() => surveyStore.currentTerm, (newTerm) => {
   if (newTerm) {
+    initializeSynonyms()
     updateHierarchy()
   }
-})
+}, { immediate: true })
 
 onMounted(() => {
   if (!currentTerm.value) {
     console.warn('No current term found, redirecting to terms page')
     goBack()
   } else {
+    initializeSynonyms()
     // Initialize hierarchy display
     nextTick(() => {
       updateHierarchy()
