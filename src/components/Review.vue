@@ -90,7 +90,7 @@
                   <a :href="selectedTerm?.parentLink" target="_blank" style="text-decoration: none; color: #007bff;">(Link)</a>
                 </li>
                 <li style="margin-bottom: 8px;"><strong>Definition:</strong> "{{ selectedTerm?.definition }}"</li>
-                <li style="margin-bottom: 8px;"><strong>Synonyms:</strong> {{ selectedTerm?.synonyms }}</li>
+                <li style="margin-bottom: 8px;"><strong>Synonyms:</strong> {{ formatSynonyms(selectedTerm.synonyms) }}</li>
               </ul>
             </div>
             
@@ -253,7 +253,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { 
   surveyStore, 
@@ -263,6 +263,12 @@ import {
   saveResponse,
   getSurveyProgress 
 } from '@/storage/storeSurvey'
+import { 
+  initializeDefaultSynonyms,
+  formatSynonyms,
+  prepareSynonymsForSubmission,
+  parseSynonymResponseData
+} from '@/utils/synonymUtils.js'
 import StarRating from '@/components/StarRating.vue'
 import SynonymSelector from '@/components/SynonymSelector.vue'
 
@@ -280,6 +286,7 @@ const isLoadingResponse = ref(false)
 const isSaving = ref(false)
 const message = ref({ text: '', type: '' })
 const selectedSynonyms = ref([])
+const defaultSynonyms = ref([])
 
 // Form data
 const formData = ref({
@@ -301,6 +308,18 @@ const selectedTerm = computed(() => {
 const surveyDisplayName = computed(() => {
   return surveyComputed.currentSurveyDisplayName?.value || surveyStore.surveyType || 'Survey'
 })
+
+// Initialize default synonyms for the selected term (using utility)
+async function initializeDefaultSynonymsForTerm() {
+  if (!selectedTerm.value?.synonyms) {
+    defaultSynonyms.value = []
+    return
+  }
+  
+  const synonymObjects = await initializeDefaultSynonyms(selectedTerm.value.synonyms)
+  defaultSynonyms.value = synonymObjects
+  console.log('Initialized default synonyms:', defaultSynonyms.value)
+}
 
 // Initialize component
 onMounted(async () => {
@@ -347,7 +366,7 @@ async function loadCompletedTerms() {
       progress.completedTerms.includes(term.id)
     )
 
-    console.log(`✅ Loaded ${completedTermsData.value.length} completed terms for review`)
+    console.log(`Loaded ${completedTermsData.value.length} completed terms for review`)
 
   } catch (error) {
     console.error('Error loading completed terms:', error)
@@ -363,7 +382,7 @@ async function loadSynonyms() {
     // Use existing searchSynonyms function to get all synonyms
     const synonymsData = await searchSynonyms('')
     allSynonyms.value = synonymsData
-    console.log(`✅ Loaded ${allSynonyms.value.length} synonyms`)
+    console.log(`Loaded ${allSynonyms.value.length} synonyms`)
   } catch (error) {
     console.error('Error loading synonyms:', error)
     allSynonyms.value = []
@@ -399,7 +418,7 @@ async function fetchUserResponseForTerm(termId, contributorId) {
         synonymRating: record.fields.synonymRating || null,
         suggestedDefinition: record.fields.suggestedDefinition || '',
         suggestedLabel: record.fields.suggestedLabel || '',
-        suggestedSynonyms: record.fields.suggestedSynonyms?.[0] || null, // Get first synonym ID
+        suggestedSynonyms: record.fields.suggestedSynonyms || null,
         allFields: record.fields
       }
     }
@@ -427,9 +446,9 @@ async function selectTerm(termId) {
       originalResponseData.value = { ...response }
       
       // Populate form with existing data
-      populateFormWithResponse(response)
+      await populateFormWithResponse(response)
       
-      console.log('✅ Loaded response for term:', termId)
+      console.log('Loaded response for term:', termId)
     } else {
       showMessage('No response found for this term', 'warning')
     }
@@ -442,8 +461,8 @@ async function selectTerm(termId) {
   }
 }
 
-// Populate form with response data
-function populateFormWithResponse(response) {
+// Populate form with response data (using utilities)
+async function populateFormWithResponse(response) {
   // Determine agreement based on ratings
   const hasRatings = response.definitionRating || response.labelRating || 
                     response.hierarchyRating || response.synonymRating
@@ -459,18 +478,18 @@ function populateFormWithResponse(response) {
     suggestedSynonyms: response.suggestedSynonyms || null
   }
   
-  // Handle synonyms if they exist
+  // Initialize default synonyms from the selected term using utility
+  await initializeDefaultSynonymsForTerm()
+  
+  // Handle suggested synonyms if they exist using utility
   if (response.suggestedSynonyms) {
-    // Convert synonym IDs back to synonym objects for the selector
-    const synonymIds = Array.isArray(response.suggestedSynonyms) 
-      ? response.suggestedSynonyms 
-      : [response.suggestedSynonyms]
+    const suggestedSynonyms = parseSynonymResponseData(response.suggestedSynonyms, allSynonyms.value)
     
-    selectedSynonyms.value = allSynonyms.value.filter(syn => 
-      synonymIds.includes(syn.id)
-    )
+    // Combine defaults with suggested synonyms
+    selectedSynonyms.value = [...defaultSynonyms.value, ...suggestedSynonyms]
   } else {
-    selectedSynonyms.value = []
+    // Only show default synonyms
+    selectedSynonyms.value = [...defaultSynonyms.value]
   }
 }
 
@@ -484,7 +503,8 @@ function handleAgreementChange() {
     formData.value.synonymRating = 0
     formData.value.suggestedDefinition = ''
     formData.value.suggestedLabel = ''
-    selectedSynonyms.value = []
+    // Reset to only default synonyms
+    selectedSynonyms.value = [...defaultSynonyms.value]
   }
 }
 
@@ -499,7 +519,8 @@ function updateRating(ratingType, value) {
     } else if (ratingType === 'labelRating') {
       formData.value.suggestedLabel = ''
     } else if (ratingType === 'synonymRating') {
-      selectedSynonyms.value = []
+      // Reset to only default synonyms
+      selectedSynonyms.value = [...defaultSynonyms.value]
     }
   }
 }
@@ -509,10 +530,13 @@ function updateSelectedSynonyms(synonyms) {
   selectedSynonyms.value = synonyms
 }
 
-// Save changes using existing store function
+// Save changes using utility functions
 async function saveChanges() {
   try {
     isSaving.value = true
+
+    // Use utility function to prepare synonyms for submission
+    const synonymData = prepareSynonymsForSubmission(selectedSynonyms.value, defaultSynonyms.value)
 
     // Prepare response data for store's saveResponse function
     const responseData = {
@@ -534,8 +558,9 @@ async function saveChanges() {
       if (formData.value.labelRating && formData.value.labelRating <= 4) {
         responseData.suggestedLabel = formData.value.suggestedLabel
       }
-      if (formData.value.synonymRating && formData.value.synonymRating <= 4 && selectedSynonyms.value.length > 0) {
-        responseData.suggestedSynonyms = selectedSynonyms.value.map(s => s.id).join(',')
+      if (formData.value.synonymRating && formData.value.synonymRating <= 4 && synonymData.synonymIds.length > 0) {
+        responseData.suggestedSynonyms = synonymData.synonymIds
+        responseData.synonymAction = synonymData.action // Include the action type for backend processing
       }
     }
 
@@ -556,9 +581,9 @@ async function saveChanges() {
 }
 
 // Cancel changes
-function cancelChanges() {
+async function cancelChanges() {
   if (originalResponseData.value) {
-    populateFormWithResponse(originalResponseData.value)
+    await populateFormWithResponse(originalResponseData.value)
     showMessage('Changes canceled', 'info')
   }
 }
@@ -596,6 +621,7 @@ function showMessage(text, type = 'info') {
 }
 
 .review-content {
+  flex: 1;
   flex: 1;
   background: white;
   padding: 20px;
