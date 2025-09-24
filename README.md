@@ -22,7 +22,7 @@ flowchart LR
     B(Term, Definition & Synonym?):::normal
     C(Next Term):::normal
     D(Feedback Page):::feedback
-    E(⭐ Star Rating for Label/Def/Hierarchy/Synonyms):::feedback
+    E(Star Rating for Label/Def/Hierarchy/Synonyms):::feedback
     F(Final Review & Completion Screen):::finish
     G(Link to Other Surveys):::finish
 
@@ -122,7 +122,7 @@ VITE_AIRTABLE_TABLE_RESPONSES=xxxxxxxx
 VITE_AIRTABLE_TABLE_SYNONYMS=xxxxxxx
 ```
 
-### 4. Running Locally
+### 5. Running Locally
 
 ```bash 
 npm run dev
@@ -132,7 +132,7 @@ or
 yarn dev
 ```
 
-### 5. Building Output Files 
+### 6. Building Output Files 
 
 ```bash 
 npm run build
@@ -195,3 +195,14 @@ To learn more about the different components inside the `src` folder check the r
 
 - [storage/README.md](src/storage/README.md)
 - [utils/README.md](src/utils/README.md)
+
+## Contribuitions
+
+A Special Thank You To: 
+
+- Alexander Collier {akcol@med.umich.edu}
+- Anastasia Yocum {akyocum@med.umich.edu}
+- Claudia Diaz-Byrd {diazbyrc@med.umich.edu}
+- Melvin Mcinnis {mmcinnis@med.umich.edu}
+
+For Your Contributions To The Project. 
