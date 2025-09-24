@@ -40,13 +40,13 @@ export const SURVEY_CONFIG = {
 
 // Airtable Configuration
 const AIRTABLE_CONFIG = {
-  apiKey: 'patnCtvjJ98Vx2Yov.c8f873488b0c55b3cc2cd24f6777c437f60a42c8c3829f8192a335bb719e5647',
-  baseId: 'appe7BjG2tW5746lU',
+  apiKey: import.meta.env.VITE_AIRTABLE_API_KEY,
+  baseId: import.meta.env.VITE_AIRTABLE_BASE_ID,
   tables: {
-    contributors: 'Contributors',
-    terms: 'tblw4Ck0CAmKKKRi9',
-    responses: 'tblgqb1wk4zvhIRnK',
-    synonyms: 'tblbL9ks4YesVY2Xy'
+    contributors: import.meta.env.VITE_AIRTABLE_TABLE_CONTRIBUTORS,
+    terms: import.meta.env.VITE_AIRTABLE_TABLE_TERMS,
+    responses: import.meta.env.VITE_AIRTABLE_TABLE_RESPONSES,
+    synonyms: import.meta.env.VITE_AIRTABLE_TABLE_SYNONYMS
   }
 }
 

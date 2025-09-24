@@ -1,29 +1,197 @@
-# sleep-survey
+# HPO Term Survey 
 
-This template should help get you started developing with Vue 3 in Vite.
+A Vue.js-based survey tool for collecting and reviewing responses about sleep-related terms and concepts. The app includes interactive components such as star ratings, synonym selection, and hierarchical term review, designed to support structured feedback and analysis.
 
-## Recommended IDE Setup
+## Overview 
 
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+### Purpose / Goal
 
-## Customize configuration
+- Collect structured feedback on HPO (Human Phenotype Ontology) terms.
 
-See [Vite Configuration Reference](https://vite.dev/config/).
+- Evaluate user understanding of term definitions, synonyms, and hierarchical relationships.
 
-## Project Setup
+- Support research or ontology refinement by gathering qualitative and quantitative data.
 
-```sh
+
+
+### Survey flow 
+
+```mermaid
+flowchart LR
+    A(Welcome Screen):::start
+    B(Term, Definition & Synonym?):::normal
+    C(Next Term):::normal
+    D(Feedback Page):::feedback
+    E(⭐ Star Rating for Label/Def/Hierarchy/Synonyms):::feedback
+    F(Final Review & Completion Screen):::finish
+    G(Link to Other Surveys):::finish
+
+    A --> B
+    B -->|Agree| C
+    B -->|Disagree| D
+    D --> E
+    E --> C
+    C --> F
+    F --> G
+
+    classDef start fill:#a3d9ff,stroke:#0366d6,stroke-width:2px,color:#000;
+    classDef normal fill:#e6f7e6,stroke:#2ecc71,stroke-width:2px,color:#000;
+    classDef feedback fill:#fff3cd,stroke:#f0ad4e,stroke-width:2px,color:#000;
+    classDef finish fill:#f9d6eb,stroke:#d63384,stroke-width:2px,color:#000;
+```
+
+### Key Features 
+
+- Interactive term review with agree/disagree options.
+
+- Star rating system for labels, definitions, hierarchy, and synonyms.
+
+- Synonym selection to propose or confirm alternative term labels.
+
+- Hierarchical navigation of terms to show relationships.
+
+- Syncronized with Airtable for easy data storage.
+
+- Links to other related surveys at the end.
+
+## Getting Started
+
+First start by cloning the repo
+
+```bash 
+git clone REPO HERE
+```
+
+This project requires **Node.js** and a package manager (**npm** or **Yarn**) to install dependencies and run the app.
+
+### 1. Install Node.js and npm
+
+macOS / Linux (using Homebrew):
+
+```bash
+# Install Homebrew if you don't have it
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install Node.js (includes npm)
+brew install node
+
+# Verify installation
+node -v
+npm -v
+```
+Windows:
+Download the Node.js installer from https://nodejs.org and follow the prompts. npm is included automatically.
+
+### 2. Install Yarn (optional, alternative to npm)
+
+```bash
+# Using Homebrew (macOS)
+brew install yarn
+
+# Using npm
+npm install --global yarn
+
+# Verify installation
+yarn -v
+```
+
+### 3. Install Dependencies 
+
+```bash 
 npm install
 ```
+or 
+```bash
+yarn install
+```
 
-### Compile and Hot-Reload for Development
+### 4. Create a .env File to Hold Api keys
 
-```sh
+```bash
+touch .env
+```
+Then inside of this file place your api keys for Airtable.
+ - Note: your Api key will need read and write access for this to work
+
+```
+VITE_AIRTABLE_API_KEY=xxxxxxx
+VITE_AIRTABLE_BASE_ID=xxxxxxx
+VITE_AIRTABLE_TABLE_CONTRIBUTORS=xxxxxxx
+VITE_AIRTABLE_TABLE_TERMS=xxxxxxx
+VITE_AIRTABLE_TABLE_RESPONSES=xxxxxxxx
+VITE_AIRTABLE_TABLE_SYNONYMS=xxxxxxx
+```
+
+### 4. Running Locally
+
+```bash 
 npm run dev
 ```
+or 
+```bash
+yarn dev
+```
 
-### Compile and Minify for Production
+### 5. Building Output Files 
 
-```sh
+```bash 
 npm run build
 ```
+or 
+```bash
+yarn build 
+```
+This will create a `dist` folder that contains your `index.html` and an `assets` folder with all compiled source files.
+
+## Project Structure 
+
+```
+HPO-Term-Survey/
+├── package.json
+├── package-lock.json / yarn.lock
+├── public/
+│   └── index.html
+├── src/
+│   ├── App.vue
+│   ├── main.js
+│   ├── assets/
+│   │   └── style.css
+│   ├── components/
+│   │   ├── Disagree.vue
+│   │   ├── Finish.vue
+│   │   ├── HierarchyNode.vue
+│   │   ├── Review.vue
+│   │   ├── StarRating.vue
+│   │   ├── SynonymSelector.vue
+│   │   ├── Terms.vue
+│   │   └── Welcome.vue
+│   │   └── readme/
+│   ├── router/
+│   │   └── index.js
+│   ├── storage/
+│   │   ├── storeSurvey.js
+│   │   └── README.md
+│   └── utils/
+│       ├── hierarchyUtils.js
+│       ├── synonymUtils.js
+│       └── README.md
+└── README.md
+```
+
+### Component READMEs
+
+To learn more about the different components inside the `src` folder check the readmes below. 
+
+- [Disagree.vue](src/components/readme/Disagree.md)
+- [Finish.vue](src/components/readme/Finish.md)
+- [HierarchyNode.vue](src/components/readme/HierarchyNode.md)
+- [Review.vue](src/components/readme/Review.md)
+- [StarRating.vue](src/components/readme/StarRating.md)
+- [SynonymSelector.vue](src/components/readme/SynonymSelector.md)
+- [Terms.vue](src/components/readme/Terms.md)
+- [Welcome.vue](src/components/readme/Welcome.md)
+
+### Storage and Utils READMEs
+
+- [storage/README.md](src/storage/README.md)
+- [utils/README.md](src/utils/README.md)
