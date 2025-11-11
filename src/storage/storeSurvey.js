@@ -28,7 +28,7 @@ export const SURVEY_CONFIG = {
     isActive: false
   },
   Sleep_Disturbance: {
-    id: 'SleepDisturbance',
+    id: 'Sleep_Disturbance',
     name: 'Sleep Disturbance',
     displayName: 'Sleep Disturbance',
     description: 'Sleep Disturbance survey',
