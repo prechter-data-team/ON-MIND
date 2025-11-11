@@ -393,13 +393,13 @@ async function loadSynonyms() {
 async function fetchUserResponseForTerm(termId, contributorId) {
   try {
     // Use the same pattern as findExistingResponse from storeSurvey.js
-    const url = `https://api.airtable.com/v0/appe7BjG2tW5746lU/tblgqb1wk4zvhIRnK`
+    const url = `https://api.airtable.com/v0/${import.meta.env.VITE_AIRTABLE_BASE_ID}/${import.meta.env.VITE_AIRTABLE_TABLE_RESPONSES}`
     const filterFormula = `AND(contributorRecordId="${contributorId}", termRecordId="${termId}")`
     const queryUrl = `${url}?filterByFormula=${encodeURIComponent(filterFormula)}`
-    
+
     const response = await fetch(queryUrl, {
       headers: {
-        'Authorization': 'Bearer patnCtvjJ98Vx2Yov.c8f873488b0c55b3cc2cd24f6777c437f60a42c8c3829f8192a335bb719e5647',
+        'Authorization': `Bearer ${import.meta.env.VITE_AIRTABLE_API_KEY}`,
         'Content-Type': 'application/json'
       }
     })
