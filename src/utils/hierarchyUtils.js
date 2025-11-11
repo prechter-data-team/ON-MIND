@@ -2,147 +2,132 @@
 import { getSurveyDisplayName } from '@/storage/storeSurvey.js'
 
 /**
- * Build hierarchy tree from Airtable terms using nextTermLabel order
+ * Build hierarchy tree from Airtable terms using children relationships
  */
 export function buildHierarchyFromTerms(terms) {
   console.log('Building hierarchy from terms:', terms)
-  
-  // Step 1: Find root terms (terms that don't have parents in the current survey)
-  const termLabels = terms.map(t => t.termLabel)
-  const rootTerms = terms.filter(term => {
-    // A term is root if its parent is not in the current survey terms
-    return !term.parents || !termLabels.includes(term.parents)
+
+  // Build a map of termLabel -> term for quick lookup
+  const termMap = new Map()
+  terms.forEach(term => termMap.set(term.termLabel, term))
+
+  // Step 1: Find root terms (terms not listed as children of any other term)
+  const allChildrenNames = new Set()
+  terms.forEach(term => {
+    if (term.children) {
+      const childNames = term.children.split(',').map(c => c.trim()).filter(c => c)
+      childNames.forEach(name => allChildrenNames.add(name))
+    }
   })
-  
+
+  const rootTerms = terms.filter(term => !allChildrenNames.has(term.termLabel))
   console.log('Root terms found:', rootTerms.map(t => t.termLabel))
-  
-  // Step 2: Build the hierarchy recursively using nextTermLabel order
+
+  // Step 2: Build the hierarchy recursively using children field
   const hierarchy = {}
-  
+
   rootTerms.forEach(rootTerm => {
-    hierarchy[rootTerm.termLabel] = buildChildrenInOrder(rootTerm, terms)
+    hierarchy[rootTerm.termLabel] = buildChildrenInOrder(rootTerm, termMap)
   })
-  
+
   console.log('Built hierarchy:', hierarchy)
   return hierarchy
 }
 
 /**
- * Recursive function to build children for a term following nextTermLabel order
+ * Recursive function to build children for a term using children field
  */
-function buildChildrenInOrder(parentTerm, allTerms) {
-  // Find all terms that have this term as their parent
-  const children = allTerms.filter(term => term.parents === parentTerm.termLabel)
-  
-  if (children.length === 0) {
-    return [] // No children, return empty array
+function buildChildrenInOrder(parentTerm, termMap) {
+  // Get children from the children field
+  if (!parentTerm.children) {
+    return [] // No children
   }
-  
-  // Sort children based on the order they appear in the parent's nextTermLabel
-  const orderedChildren = sortChildrenByNextTermOrder(children, parentTerm, allTerms)
-  
-  console.log(`Children of "${parentTerm.termLabel}":`, orderedChildren.map(c => c.termLabel))
-  
+
+  const childNames = parentTerm.children.split(',').map(c => c.trim()).filter(c => c)
+
+  if (childNames.length === 0) {
+    return [] // No children
+  }
+
+  // Get actual term objects for children
+  const children = childNames
+    .map(name => termMap.get(name))
+    .filter(term => term !== undefined)
+
+  // Sort children by survey flow order using nextTermLabel
+  const sortedChildren = sortChildrenBySurveyFlow(children, termMap)
+
+  console.log(`Children of "${parentTerm.termLabel}":`, sortedChildren.map(c => c.termLabel))
+
   // Check if any children have their own children
-  const childrenWithGrandchildren = orderedChildren.filter(child => {
-    return allTerms.some(term => term.parents === child.termLabel)
-  })
-  
+  const childrenWithGrandchildren = sortedChildren.filter(child => child.children && child.children.trim())
+
   if (childrenWithGrandchildren.length === 0) {
-    // All children are leaf nodes, return as array in order
-    return orderedChildren.map(child => child.termLabel)
+    // All children are leaf nodes, return as array
+    return sortedChildren.map(child => child.termLabel)
   }
-  
+
   // Mixed case: some children have children, some don't
   const result = {}
-  orderedChildren.forEach(child => {
-    const childHasChildren = allTerms.some(term => term.parents === child.termLabel)
-    if (childHasChildren) {
-      result[child.termLabel] = buildChildrenInOrder(child, allTerms)
+  sortedChildren.forEach(child => {
+    if (child.children && child.children.trim()) {
+      result[child.termLabel] = buildChildrenInOrder(child, termMap)
     } else {
       // For leaf nodes in mixed case, we still use the object notation
       result[child.termLabel] = []
     }
   })
-  
+
   return result
 }
 
 /**
- * Function to sort children based on nextTermLabel order
+ * Sort children based on the survey flow using nextTermLabel chain
  */
-function sortChildrenByNextTermOrder(children, parentTerm, allTerms) {
-  if (!parentTerm.nextTermLabel || children.length <= 1) {
-    return children // No ordering info or only one child
+function sortChildrenBySurveyFlow(children, termMap) {
+  if (children.length <= 1) {
+    return children
   }
-  
-  // Build the survey flow chain starting from parent
-  const surveyFlowOrder = buildSurveyFlowChain(allTerms)
-  console.log('Survey flow order:', surveyFlowOrder)
-  
-  // Sort children based on their position in the survey flow
-  const orderedChildren = [...children].sort((a, b) => {
-    const indexA = surveyFlowOrder.indexOf(a.termLabel)
-    const indexB = surveyFlowOrder.indexOf(b.termLabel)
-    
-    // If both terms are in the flow, sort by their position
-    if (indexA !== -1 && indexB !== -1) {
-      return indexA - indexB
-    }
-    
-    // If only one is in the flow, prioritize it
-    if (indexA !== -1) return -1
-    if (indexB !== -1) return 1
-    
-    // If neither is in the flow, maintain original order
-    return 0
-  })
-  
-  return orderedChildren
-}
 
-/**
- * Function to build the complete survey flow chain using nextTermLabel
- */
-function buildSurveyFlowChain(terms) {
-  // Find the root term (starting point)
-  const termLabels = terms.map(t => t.termLabel)
-  const rootTerm = terms.find(term => {
-    return !term.parents || !termLabels.includes(term.parents)
-  })
-  
-  if (!rootTerm) return []
-  
-  const flowChain = []
+  // Build survey flow order map (term -> position in survey)
+  const surveyFlowMap = new Map()
+  let position = 0
   const visited = new Set()
-  let currentTerm = rootTerm
-  
-  while (currentTerm && !visited.has(currentTerm.termLabel)) {
-    flowChain.push(currentTerm.termLabel)
-    visited.add(currentTerm.termLabel)
-    
-    // Find next term based on nextTermLabel
-    if (currentTerm.nextTermLabel) {
-      let nextTermLabel = currentTerm.nextTermLabel
-      
-      // Handle nextTermLabel as array
-      if (Array.isArray(nextTermLabel)) {
-        nextTermLabel = nextTermLabel[0] // Take first one
-      }
-      
-      // Extract term label if it contains multiple terms separated by commas
-      if (typeof nextTermLabel === 'string' && nextTermLabel.includes(',')) {
-        nextTermLabel = nextTermLabel.split(',')[0].trim()
-      }
-      
-      // Find the next term in our current survey
-      currentTerm = terms.find(term => term.termLabel === nextTermLabel)
+
+  // Start from the first child and follow nextTermLabel chain
+  let current = children[0]
+  while (current && !visited.has(current.termLabel)) {
+    surveyFlowMap.set(current.termLabel, position++)
+    visited.add(current.termLabel)
+
+    // Get next term
+    if (current.nextTermLabel) {
+      const nextLabel = Array.isArray(current.nextTermLabel)
+        ? current.nextTermLabel[0]
+        : current.nextTermLabel
+      current = termMap.get(nextLabel)
     } else {
       break
     }
   }
-  
-  return flowChain
+
+  // Sort children based on their position in survey flow
+  return [...children].sort((a, b) => {
+    const posA = surveyFlowMap.get(a.termLabel)
+    const posB = surveyFlowMap.get(b.termLabel)
+
+    // If both have positions, sort by position
+    if (posA !== undefined && posB !== undefined) {
+      return posA - posB
+    }
+
+    // If only one has position, prioritize it
+    if (posA !== undefined) return -1
+    if (posB !== undefined) return 1
+
+    // Neither in flow, maintain original order
+    return 0
+  })
 }
 
 /**
@@ -152,12 +137,17 @@ export function getHierarchyTitle(surveyType, allTerms) {
   if (!allTerms || allTerms.length === 0) {
     return 'Loading Hierarchy...'
   }
-  
-  // Find the root term to use as title
-  const termLabels = allTerms.map(t => t.termLabel)
-  const rootTerm = allTerms.find(term => {
-    return !term.parents || !termLabels.includes(term.parents)
+
+  // Find the root term to use as title (not listed as anyone's child)
+  const allChildrenNames = new Set()
+  allTerms.forEach(term => {
+    if (term.children) {
+      const childNames = term.children.split(',').map(c => c.trim()).filter(c => c)
+      childNames.forEach(name => allChildrenNames.add(name))
+    }
   })
+
+  const rootTerm = allTerms.find(term => !allChildrenNames.has(term.termLabel))
   
   // Use survey config for display name
   const surveyDisplayName = getSurveyDisplayName(surveyType)

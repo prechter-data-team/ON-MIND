@@ -9,7 +9,7 @@ export const SURVEY_CONFIG = {
     displayName: 'Clinical Sleep Disorders',
     description: 'Comprehensive clinical sleep disorders survey',
     airtableField: 'Include in Survey Clinical Sleep',
-    isActive: true
+    isActive: false
   },
   parasomnia: {
     id: 'parasomnia',
@@ -17,7 +17,7 @@ export const SURVEY_CONFIG = {
     displayName: 'Parasomnia Disorders',
     description: 'Parasomnia-specific sleep disorders survey',
     airtableField: 'Include In Survey Parasomnia',
-    isActive: true
+    isActive: false
   },
   abnormal: {
     id: 'abnormal',
@@ -25,6 +25,14 @@ export const SURVEY_CONFIG = {
     displayName: 'Abnormal Emotional State',
     description: 'Abnormal Emotional State survey',
     airtableField: 'Include in Abnormal Survey',
+    isActive: false
+  },
+  Sleep_Disturbance: {
+    id: 'SleepDisturbance',
+    name: 'Sleep Disturbance',
+    displayName: 'Sleep Disturbance',
+    description: 'Sleep Disturbance survey',
+    airtableField: 'Include In Survey Sleep disturbance',
     isActive: true
   }
   // Add more surveys here as needed:
@@ -256,6 +264,7 @@ export async function fetchSurveyTerms(surveyType) {
         definition: record.fields.def || 'No definition available',
         hpoId: record.fields.id || '',
         parents: record.fields.parentsDoNotDelete || 'No parents',
+        children: record.fields.childrenDoNotDelete || '',
         parentLink: record.fields.parentHpoLink || '#',
         synonyms: record.fields.synAndTypeDoNotDelete || 'No synonyms',
         nextTermLabel: record.fields.nextTermLabel || '',
