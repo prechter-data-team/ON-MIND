@@ -219,7 +219,7 @@ export async function fetchContributors() {
     } while (offset)
     
     console.log(`✅ Fetched ${allContributors.length} contributors`)
-    return allContributors
+    return allContributors.sort((a, b) => a.name.localeCompare(b.name))
     
   } catch (error) {
     console.error('❌ Error fetching contributors:', error)

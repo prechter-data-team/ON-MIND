@@ -83,6 +83,106 @@
       </div>
     </div>
   </div>
+
+  <!-- ============================================================ -->
+  <!-- ZOIDBERG TEST USER MODAL                                      -->
+  <!-- ============================================================ -->
+  <Teleport to="body">
+    <div v-if="showZoidbergModal" class="zoidberg-overlay" @click.self="null">
+      <div class="zoidberg-modal">
+
+        <!-- Warning Banner -->
+        <div class="zoidberg-warning-banner">
+          <span class="zoidberg-warning-icon">⚠️</span>
+          <span>WARNING: TEST ACCOUNT DETECTED</span>
+        </div>
+
+        <div class="zoidberg-body">
+          <p class="zoidberg-description">
+            You are currently using a <strong>TEST account</strong>. Please provide your real information below to update your contributor record.
+          </p>
+
+          <!-- Form Fields -->
+          <div class="zoidberg-form">
+
+            <div class="zoidberg-field">
+              <label>First Name <span class="required">*</span></label>
+              <input
+                v-model="zoidbergForm.firstName"
+                type="text"
+                placeholder="Enter your first name"
+                :class="{ 'input-error': zoidbergErrors.firstName }"
+                @input="zoidbergErrors.firstName = ''"
+              />
+              <span v-if="zoidbergErrors.firstName" class="field-error">{{ zoidbergErrors.firstName }}</span>
+            </div>
+
+            <div class="zoidberg-field">
+              <label>Last Name <span class="required">*</span></label>
+              <input
+                v-model="zoidbergForm.lastName"
+                type="text"
+                placeholder="Enter your last name"
+                :class="{ 'input-error': zoidbergErrors.lastName }"
+                @input="zoidbergErrors.lastName = ''"
+              />
+              <span v-if="zoidbergErrors.lastName" class="field-error">{{ zoidbergErrors.lastName }}</span>
+            </div>
+
+            <div class="zoidberg-field">
+              <label>Preferred First Name <span class="required">*</span></label>
+              <input
+                v-model="zoidbergForm.preferredFirstName"
+                type="text"
+                placeholder="Enter your preferred first name"
+                :class="{ 'input-error': zoidbergErrors.preferredFirstName }"
+                @input="zoidbergErrors.preferredFirstName = ''"
+              />
+              <span v-if="zoidbergErrors.preferredFirstName" class="field-error">{{ zoidbergErrors.preferredFirstName }}</span>
+            </div>
+
+            <div class="zoidberg-field">
+              <label>Email <span class="required">*</span></label>
+              <input
+                v-model="zoidbergForm.email"
+                type="email"
+                placeholder="Enter your email address"
+                :class="{ 'input-error': zoidbergErrors.email }"
+                @input="zoidbergErrors.email = ''"
+              />
+              <span v-if="zoidbergErrors.email" class="field-error">{{ zoidbergErrors.email }}</span>
+            </div>
+
+          </div>
+
+          <!-- Submit Error -->
+          <div v-if="zoidbergSubmitError" class="zoidberg-submit-error">
+            {{ zoidbergSubmitError }}
+          </div>
+
+          <!-- Success Message -->
+          <div v-if="zoidbergSuccess" class="zoidberg-success">
+            ✅ Your information has been updated successfully!
+          </div>
+
+          <!-- Buttons -->
+          <div class="zoidberg-actions">
+            <button
+              class="zoidberg-submit-btn"
+              @click="submitZoidbergForm"
+              :disabled="zoidbergSubmitting || zoidbergSuccess"
+            >
+              <span v-if="zoidbergSubmitting" class="zoidberg-spinner"></span>
+              <span v-else-if="zoidbergSuccess">Saved!</span>
+              <span v-else>Submit &amp; Continue</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
 </template>
 
 <script setup>
@@ -108,26 +208,38 @@ const error = ref(null)
 const welcomeMessage = ref('')
 const surveyStatus = ref(null)
 
-// Get survey type from URL parameters (support multiple parameter names)
+// ── Zoidberg modal state ──────────────────────────────────────────
+const showZoidbergModal = ref(false)
+const zoidbergContributorId = ref(null)   // record ID to PATCH
+const zoidbergForm = ref({
+  firstName: '',
+  lastName: '',
+  preferredFirstName: '',
+  email: ''
+})
+const zoidbergErrors = ref({
+  firstName: '',
+  lastName: '',
+  preferredFirstName: '',
+  email: ''
+})
+const zoidbergSubmitting = ref(false)
+const zoidbergSubmitError = ref('')
+const zoidbergSuccess = ref(false)
+// ─────────────────────────────────────────────────────────────────
+
+// Get survey type from URL parameters
 const surveyType = computed(() => {
   return route.query.survey || route.query.surveyID || route.query.surveyid || 'clinical'
 })
 
-// Use survey config for display names
-const surveyDisplayName = computed(() => {
-  return getSurveyDisplayName(surveyType.value)
-})
+const surveyDisplayName = computed(() => getSurveyDisplayName(surveyType.value))
+const surveyName = computed(() => getSurveyName(surveyType.value))
 
-const surveyName = computed(() => {
-  return getSurveyName(surveyType.value)
-})
-
-// Check if user can start survey
 const canStartSurvey = computed(() => {
   return selectedContributorId.value && !isLoading.value
 })
 
-// Dynamic button text based on survey status
 const buttonText = computed(() => {
   if (!selectedContributorId.value) return 'Select Contributor'
   if (isLoading.value) return 'Loading...'
@@ -136,12 +248,115 @@ const buttonText = computed(() => {
   return 'Start Survey'
 })
 
-// Watch for URL parameter changes
 watch(() => route.query.contributorId, (newContributorId) => {
   if (newContributorId && contributors.value.length > 0) {
     autoSelectContributor(newContributorId)
   }
 })
+
+// ── Zoidberg check ────────────────────────────────────────────────
+/**
+ * Returns true if the contributor's first name is "Zoidberg" (case-insensitive).
+ * Works whether the name field is "Zoidberg", "Zoidberg Smith", etc.
+ */
+function isTestUser(contributorName) {
+  if (!contributorName) return false
+  const firstName = contributorName.trim().split(/\s+/)[0]
+  return firstName.toLowerCase() === 'zoidberg'
+}
+
+function maybeShowZoidbergModal(contributor) {
+  if (isTestUser(contributor.name)) {
+    zoidbergContributorId.value = contributor.id
+    zoidbergForm.value = { firstName: '', lastName: '', preferredFirstName: '', email: '' }
+    zoidbergErrors.value = { firstName: '', lastName: '', preferredFirstName: '', email: '' }
+    zoidbergSubmitError.value = ''
+    zoidbergSuccess.value = false
+    showZoidbergModal.value = true
+  }
+}
+// ─────────────────────────────────────────────────────────────────
+
+// ── Airtable PATCH for Zoidberg form ─────────────────────────────
+async function submitZoidbergForm() {
+  // Validate
+  let valid = true
+  zoidbergErrors.value = { firstName: '', lastName: '', preferredFirstName: '', email: '' }
+
+  if (!zoidbergForm.value.firstName.trim()) {
+    zoidbergErrors.value.firstName = 'First name is required.'
+    valid = false
+  }
+  if (!zoidbergForm.value.lastName.trim()) {
+    zoidbergErrors.value.lastName = 'Last name is required.'
+    valid = false
+  }
+  if (!zoidbergForm.value.preferredFirstName.trim()) {
+    zoidbergErrors.value.preferredFirstName = 'Preferred first name is required.'
+    valid = false
+  }
+  if (!zoidbergForm.value.email.trim()) {
+    zoidbergErrors.value.email = 'Email is required.'
+    valid = false
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(zoidbergForm.value.email.trim())) {
+    zoidbergErrors.value.email = 'Please enter a valid email address.'
+    valid = false
+  }
+  if (!valid) return
+
+  zoidbergSubmitting.value = true
+  zoidbergSubmitError.value = ''
+
+  try {
+    const baseId   = import.meta.env.VITE_AIRTABLE_BASE_ID
+    const tableId  = import.meta.env.VITE_AIRTABLE_TABLE_CONTRIBUTORS
+    const apiKey   = import.meta.env.VITE_AIRTABLE_API_KEY
+    const recordId = zoidbergContributorId.value
+
+    const fields = {
+      firstName: zoidbergForm.value.firstName.trim(),
+      lastName: zoidbergForm.value.lastName.trim(),
+      preferredFirst: zoidbergForm.value.preferredFirstName.trim(),
+      email: zoidbergForm.value.email.trim()
+    }
+
+    const response = await fetch(
+      `https://api.airtable.com/v0/${baseId}/${tableId}/${recordId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ fields })
+      }
+    )
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.error?.message || `Airtable error ${response.status}`)
+    }
+
+    console.log('✅ Zoidberg record updated:', data)
+    zoidbergSuccess.value = true
+
+    // Refresh contributor list so dropdown shows updated name
+    await loadContributors()
+
+    // Close modal after short delay so user sees success message
+    setTimeout(() => {
+      showZoidbergModal.value = false
+    }, 1800)
+
+  } catch (err) {
+    console.error('❌ Failed to update Zoidberg record:', err)
+    zoidbergSubmitError.value = `Failed to save: ${err.message}. Please try again.`
+  } finally {
+    zoidbergSubmitting.value = false
+  }
+}
+// ─────────────────────────────────────────────────────────────────
 
 // Methods
 async function loadContributors() {
@@ -155,7 +370,6 @@ async function loadContributors() {
     
     console.log(`✅ Loaded ${contributorList.length} contributors`)
     
-    // Auto-select contributor if provided in URL
     const urlContributorId = route.query.contributorId
     if (urlContributorId) {
       autoSelectContributor(urlContributorId)
@@ -177,6 +391,9 @@ function autoSelectContributor(contributorId) {
     updateWelcomeMessage(contributor.name, surveyType.value)
     checkContributorSurveyStatus(contributorId)
     console.log(`✅ Auto-selected contributor: ${contributor.name} (${contributorId})`)
+
+    // Check if this is the Zoidberg test account
+    maybeShowZoidbergModal(contributor)
   } else {
     console.warn(`⚠️ Contributor ID ${contributorId} not found`)
     error.value = 'The contributor link you used is not valid. Please select your name from the dropdown.'
@@ -206,10 +423,15 @@ async function onContributorChange() {
     return
   }
   
-  // Clear welcome message when manually changing selection
   welcomeMessage.value = ''
   
-  // Check survey status for selected contributor
+  const contributor = contributors.value.find(c => c.id === selectedContributorId.value)
+
+  // Check if this is the Zoidberg test account
+  if (contributor) {
+    maybeShowZoidbergModal(contributor)
+  }
+
   await checkContributorSurveyStatus(selectedContributorId.value)
 }
 
@@ -217,7 +439,6 @@ async function checkContributorSurveyStatus(contributorId) {
   try {
     console.log(`🔍 Checking ${surveyDisplayName.value} survey status for contributor: ${contributorId}`)
     
-    // Initialize survey to get current status
     const result = await initializeSurvey(contributorId, surveyType.value)
     
     surveyStatus.value = {
@@ -242,13 +463,11 @@ function startSurvey() {
   
   console.log(`🚀 Starting ${surveyDisplayName.value} survey...`)
   
-  // Build navigation URL with parameters (use consistent 'survey' parameter)
   const queryParams = {
     contributor: selectedContributorId.value,
-    survey: surveyType.value // Always use 'survey' parameter for consistency
+    survey: surveyType.value
   }
   
-  // Navigate to appropriate page
   if (surveyStatus.value?.isComplete) {
     console.log('📊 Redirecting to review page - survey completed')
     router.push({ path: '/review', query: queryParams })
@@ -264,10 +483,7 @@ onMounted(() => {
   console.log('Survey type from URL:', surveyType.value)
   console.log('Survey display name:', surveyDisplayName.value)
   
-  // Reset survey store for fresh start
   resetSurveyStore()
-  
-  // Load contributors
   loadContributors()
 })
 </script>
@@ -499,6 +715,202 @@ onMounted(() => {
   
   .survey-content {
     padding: 20px !important;
+  }
+}
+
+/* ================================================================ */
+/* ZOIDBERG MODAL STYLES                                             */
+/* ================================================================ */
+
+.zoidberg-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: overlayFadeIn 0.2s ease;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.zoidberg-modal {
+  background: white;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  animation: modalSlideIn 0.25s ease;
+}
+
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(-20px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.zoidberg-warning-banner {
+  background: #b7410e;
+  color: white;
+  padding: 16px 24px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: uppercase;
+}
+
+.zoidberg-warning-icon {
+  font-size: 1.3rem;
+}
+
+.zoidberg-body {
+  padding: 28px 28px 24px;
+}
+
+.zoidberg-description {
+  color: #2d3748;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0 0 24px 0;
+}
+
+.zoidberg-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.zoidberg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zoidberg-field label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.required {
+  color: #c53030;
+}
+
+.zoidberg-field input {
+  padding: 11px 14px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  color: #2d3748;
+  transition: border-color 0.2s ease;
+  outline: none;
+  font-family: inherit;
+}
+
+.zoidberg-field input:focus {
+  border-color: #00274C;
+}
+
+.zoidberg-field input.input-error {
+  border-color: #c53030;
+  background: #fff5f5;
+}
+
+.field-error {
+  font-size: 0.8rem;
+  color: #c53030;
+  margin-top: 2px;
+}
+
+.zoidberg-submit-error {
+  background: #fff5f5;
+  border: 1px solid #feb2b2;
+  color: #c53030;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  margin-bottom: 16px;
+}
+
+.zoidberg-success {
+  background: #f0fff4;
+  border: 1px solid #9ae6b4;
+  color: #276749;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+.zoidberg-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.zoidberg-submit-btn {
+  background: #00274C;
+  color: white;
+  border: none;
+  padding: 13px 28px;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  font-family: inherit;
+  min-width: 160px;
+  justify-content: center;
+}
+
+.zoidberg-submit-btn:hover:not(:disabled) {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+.zoidberg-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.zoidberg-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 520px) {
+  .zoidberg-modal {
+    max-width: 100%;
+    border-radius: 12px;
+  }
+  .zoidberg-body {
+    padding: 20px;
+  }
+  .zoidberg-submit-btn {
+    width: 100%;
   }
 }
 </style>
