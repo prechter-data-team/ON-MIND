@@ -11,7 +11,7 @@ export function buildHierarchyFromTerms(terms) {
   const termMap = new Map()
   terms.forEach(term => termMap.set(term.termLabel, term))
 
-  // Step 1: Find root terms (terms not listed as children of any other term)
+  // Step 1: Find all terms that are listed as children of another term IN this survey
   const allChildrenNames = new Set()
   terms.forEach(term => {
     if (term.children) {
@@ -20,14 +20,40 @@ export function buildHierarchyFromTerms(terms) {
     }
   })
 
-  const rootTerms = terms.filter(term => !allChildrenNames.has(term.termLabel))
-  console.log('Root terms found:', rootTerms.map(t => t.termLabel))
+  // Step 2: Separate true roots from orphaned leaf terms
+  // A true root: not a child of anyone AND has children of its own in this survey
+  // An orphaned leaf: not a child of anyone AND has no children in this survey
+  //   (its real parent exists in HPO but wasn't included in the survey term set)
+  const rootTerms = []
+  const orphanedLeaves = []
 
-  // Step 2: Build the hierarchy recursively using children field
+  terms.forEach(term => {
+    if (!allChildrenNames.has(term.termLabel)) {
+      const hasChildrenInSurvey = term.children &&
+        term.children.split(',').map(c => c.trim()).filter(c => c)
+          .some(childName => termMap.has(childName))
+
+      if (hasChildrenInSurvey) {
+        rootTerms.push(term)
+      } else {
+        orphanedLeaves.push(term)
+      }
+    }
+  })
+
+  console.log('Root terms found:', rootTerms.map(t => t.termLabel))
+  console.log('Orphaned leaf terms (pushed to bottom):', orphanedLeaves.map(t => t.termLabel))
+
+  // Step 3: Build hierarchy for true root terms first
   const hierarchy = {}
 
   rootTerms.forEach(rootTerm => {
     hierarchy[rootTerm.termLabel] = buildChildrenInOrder(rootTerm, termMap)
+  })
+
+  // Step 4: Append orphaned leaves at the bottom with empty children
+  orphanedLeaves.forEach(term => {
+    hierarchy[term.termLabel] = []
   })
 
   console.log('Built hierarchy:', hierarchy)
@@ -38,42 +64,51 @@ export function buildHierarchyFromTerms(terms) {
  * Recursive function to build children for a term using children field
  */
 function buildChildrenInOrder(parentTerm, termMap) {
-  // Get children from the children field
   if (!parentTerm.children) {
-    return [] // No children
+    return []
   }
 
   const childNames = parentTerm.children.split(',').map(c => c.trim()).filter(c => c)
 
   if (childNames.length === 0) {
-    return [] // No children
+    return []
   }
 
-  // Get actual term objects for children
+  // Only include children that exist in this survey's term set
   const children = childNames
     .map(name => termMap.get(name))
     .filter(term => term !== undefined)
+
+  if (children.length === 0) {
+    return []
+  }
 
   // Sort children by survey flow order using nextTermLabel
   const sortedChildren = sortChildrenBySurveyFlow(children, termMap)
 
   console.log(`Children of "${parentTerm.termLabel}":`, sortedChildren.map(c => c.termLabel))
 
-  // Check if any children have their own children
-  const childrenWithGrandchildren = sortedChildren.filter(child => child.children && child.children.trim())
+  const childrenWithGrandchildren = sortedChildren.filter(child => {
+    if (!child.children || !child.children.trim()) return false
+    // Only count grandchildren that exist in the survey
+    return child.children.split(',').map(c => c.trim()).filter(c => c)
+      .some(name => termMap.has(name))
+  })
 
   if (childrenWithGrandchildren.length === 0) {
-    // All children are leaf nodes, return as array
     return sortedChildren.map(child => child.termLabel)
   }
 
   // Mixed case: some children have children, some don't
   const result = {}
   sortedChildren.forEach(child => {
-    if (child.children && child.children.trim()) {
+    const hasChildrenInSurvey = child.children &&
+      child.children.split(',').map(c => c.trim()).filter(c => c)
+        .some(name => termMap.has(name))
+
+    if (hasChildrenInSurvey) {
       result[child.termLabel] = buildChildrenInOrder(child, termMap)
     } else {
-      // For leaf nodes in mixed case, we still use the object notation
       result[child.termLabel] = []
     }
   })
@@ -89,18 +124,15 @@ function sortChildrenBySurveyFlow(children, termMap) {
     return children
   }
 
-  // Build survey flow order map (term -> position in survey)
   const surveyFlowMap = new Map()
   let position = 0
   const visited = new Set()
 
-  // Start from the first child and follow nextTermLabel chain
   let current = children[0]
   while (current && !visited.has(current.termLabel)) {
     surveyFlowMap.set(current.termLabel, position++)
     visited.add(current.termLabel)
 
-    // Get next term
     if (current.nextTermLabel) {
       const nextLabel = Array.isArray(current.nextTermLabel)
         ? current.nextTermLabel[0]
@@ -111,21 +143,13 @@ function sortChildrenBySurveyFlow(children, termMap) {
     }
   }
 
-  // Sort children based on their position in survey flow
   return [...children].sort((a, b) => {
     const posA = surveyFlowMap.get(a.termLabel)
     const posB = surveyFlowMap.get(b.termLabel)
 
-    // If both have positions, sort by position
-    if (posA !== undefined && posB !== undefined) {
-      return posA - posB
-    }
-
-    // If only one has position, prioritize it
+    if (posA !== undefined && posB !== undefined) return posA - posB
     if (posA !== undefined) return -1
     if (posB !== undefined) return 1
-
-    // Neither in flow, maintain original order
     return 0
   })
 }
@@ -138,7 +162,6 @@ export function getHierarchyTitle(surveyType, allTerms) {
     return 'Loading Hierarchy...'
   }
 
-  // Find the root term to use as title (not listed as anyone's child)
   const allChildrenNames = new Set()
   allTerms.forEach(term => {
     if (term.children) {
@@ -147,9 +170,12 @@ export function getHierarchyTitle(surveyType, allTerms) {
     }
   })
 
-  const rootTerm = allTerms.find(term => !allChildrenNames.has(term.termLabel))
-  
-  // Use survey config for display name
+  // Use first true root term (has children) as the title
+  const rootTerm = allTerms.find(term => {
+    if (allChildrenNames.has(term.termLabel)) return false
+    return term.children && term.children.trim()
+  })
+
   const surveyDisplayName = getSurveyDisplayName(surveyType)
   return rootTerm ? `${rootTerm.termLabel} Hierarchy` : `${surveyDisplayName} Hierarchy`
 }
@@ -172,7 +198,6 @@ export function createHierarchyControls(hierarchyNodesRef) {
 
   const showCurrentOnly = () => {
     collapseAll()
-    // Expand path to current term
     setTimeout(() => {
       hierarchyNodesRef.value.forEach(node => {
         if (node.expandToCurrentTerm) node.expandToCurrentTerm()

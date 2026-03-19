@@ -29,24 +29,49 @@
 
         <!-- Welcome Screen -->
         <div v-else class="welcome-screen">
-          <!-- Contributor Selection -->
-          <div class="contributor-select">
-            <label for="contributorSelect">Please select your contributor record:</label>
-            <select 
-              id="contributorSelect" 
-              v-model="selectedContributorId"
+          <!-- Contributor Selection (searchable dropdown) -->
+          <div class="contributor-select" ref="dropdownRef">
+            <label>Please select your contributor record:</label>
+
+            <!-- Trigger -->
+            <div
               class="contributor-dropdown"
-              @change="onContributorChange"
+              :class="{ 'dropdown-open': dropdownOpen }"
+              @click="toggleDropdown"
             >
-              <option value="">Please select a contributor...</option>
-              <option 
-                v-for="contributor in contributors" 
-                :key="contributor.id" 
-                :value="contributor.id"
-              >
-                {{ contributor.name }}
-              </option>
-            </select>
+              <span :class="{ placeholder: !selectedContributorId }">
+                {{ selectedContributorName || 'Please select a contributor...' }}
+              </span>
+              <span class="dropdown-arrow">{{ dropdownOpen ? '▲' : '▼' }}</span>
+            </div>
+
+            <!-- Panel -->
+            <div v-if="dropdownOpen" class="dropdown-panel">
+              <div class="dropdown-search-wrap">
+                <input
+                  ref="searchInputRef"
+                  v-model="contributorSearch"
+                  class="dropdown-search"
+                  type="text"
+                  placeholder="Search by name..."
+                  @click.stop
+                />
+              </div>
+              <ul class="dropdown-list">
+                <li v-if="filteredContributors.length === 0" class="dropdown-empty">
+                  No contributors found
+                </li>
+                <li
+                  v-for="contributor in filteredContributors"
+                  :key="contributor.id"
+                  class="dropdown-item"
+                  :class="{ selected: contributor.id === selectedContributorId }"
+                  @click="selectContributor(contributor)"
+                >
+                  {{ contributor.name }}
+                </li>
+              </ul>
+            </div>
           </div>
 
           <!-- Survey Status Display -->
@@ -95,6 +120,7 @@
         <div class="zoidberg-warning-banner">
           <span class="zoidberg-warning-icon">⚠️</span>
           <span>WARNING: TEST ACCOUNT DETECTED</span>
+          <button class="zoidberg-close-btn" @click="showZoidbergModal = false">✕</button>
         </div>
 
         <div class="zoidberg-body">
@@ -186,7 +212,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { 
   fetchContributors, 
@@ -194,7 +220,8 @@ import {
   surveyStore,
   resetSurveyStore,
   getSurveyDisplayName,
-  getSurveyName
+  getSurveyName,
+  getSurveyConfig
 } from '@/storage/storeSurvey.js'
 
 const route = useRoute()
@@ -208,9 +235,53 @@ const error = ref(null)
 const welcomeMessage = ref('')
 const surveyStatus = ref(null)
 
+// ── Searchable dropdown state ─────────────────────────────────────
+const dropdownOpen = ref(false)
+const contributorSearch = ref('')
+const searchInputRef = ref(null)
+const dropdownRef = ref(null)
+
+const selectedContributorName = computed(() => {
+  if (!selectedContributorId.value) return ''
+  const c = contributors.value.find(c => c.id === selectedContributorId.value)
+  return c ? c.name : ''
+})
+
+const filteredContributors = computed(() => {
+  const q = contributorSearch.value.trim().toLowerCase()
+  if (!q) return contributors.value
+  return contributors.value.filter(c => c.name.toLowerCase().includes(q))
+})
+
+function toggleDropdown() {
+  dropdownOpen.value = !dropdownOpen.value
+  if (dropdownOpen.value) {
+    contributorSearch.value = ''
+    nextTick(() => searchInputRef.value?.focus())
+  }
+}
+
+function closeDropdown() {
+  dropdownOpen.value = false
+  contributorSearch.value = ''
+}
+
+function selectContributor(contributor) {
+  selectedContributorId.value = contributor.id
+  closeDropdown()
+  onContributorChange()
+}
+
+function handleOutsideClick(e) {
+  if (dropdownRef.value && !dropdownRef.value.contains(e.target)) {
+    closeDropdown()
+  }
+}
+// ─────────────────────────────────────────────────────────────────
+
 // ── Zoidberg modal state ──────────────────────────────────────────
 const showZoidbergModal = ref(false)
-const zoidbergContributorId = ref(null)   // record ID to PATCH
+const zoidbergContributorId = ref(null)
 const zoidbergForm = ref({
   firstName: '',
   lastName: '',
@@ -248,17 +319,13 @@ const buttonText = computed(() => {
   return 'Start Survey'
 })
 
-watch(() => route.query.contributorId, (newContributorId) => {
+watch(() => route.query.contributorId || route.query.contributorID, (newContributorId) => {
   if (newContributorId && contributors.value.length > 0) {
     autoSelectContributor(newContributorId)
   }
 })
 
 // ── Zoidberg check ────────────────────────────────────────────────
-/**
- * Returns true if the contributor's first name is "Zoidberg" (case-insensitive).
- * Works whether the name field is "Zoidberg", "Zoidberg Smith", etc.
- */
 function isTestUser(contributorName) {
   if (!contributorName) return false
   const firstName = contributorName.trim().split(/\s+/)[0]
@@ -278,6 +345,28 @@ function maybeShowZoidbergModal(contributor) {
 // ─────────────────────────────────────────────────────────────────
 
 // ── Airtable PATCH for Zoidberg form ─────────────────────────────
+// Dynamically picks the right Airtable base based on the current survey
+function getAirtableEnvForSurvey(surveyId) {
+  const config = getSurveyConfig(surveyId)
+  const configKey = config?.airtableConfig || 'default'
+
+  if (configKey === 'default') {
+    return {
+      apiKey:  import.meta.env.VITE_AIRTABLE_API_KEY,
+      baseId:  import.meta.env.VITE_AIRTABLE_BASE_ID,
+      tableId: import.meta.env.VITE_AIRTABLE_TABLE_CONTRIBUTORS
+    }
+  }
+
+  // For any non-default survey (e.g. 'social'), use the matching _SOCIAL env vars
+  const suffix = configKey.toUpperCase()
+  return {
+    apiKey:  import.meta.env[`VITE_AIRTABLE_API_KEY_${suffix}`],
+    baseId:  import.meta.env[`VITE_AIRTABLE_BASE_ID_${suffix}`],
+    tableId: import.meta.env[`VITE_AIRTABLE_TABLE_CONTRIBUTORS_${suffix}`]
+  }
+}
+
 async function submitZoidbergForm() {
   // Validate
   let valid = true
@@ -308,9 +397,8 @@ async function submitZoidbergForm() {
   zoidbergSubmitError.value = ''
 
   try {
-    const baseId   = import.meta.env.VITE_AIRTABLE_BASE_ID
-    const tableId  = import.meta.env.VITE_AIRTABLE_TABLE_CONTRIBUTORS
-    const apiKey   = import.meta.env.VITE_AIRTABLE_API_KEY
+    // ✅ Use the correct Airtable base for the current survey
+    const { apiKey, baseId, tableId } = getAirtableEnvForSurvey(surveyType.value)
     const recordId = zoidbergContributorId.value
 
     const fields = {
@@ -344,7 +432,6 @@ async function submitZoidbergForm() {
     // Refresh contributor list so dropdown shows updated name
     await loadContributors()
 
-    // Close modal after short delay so user sees success message
     setTimeout(() => {
       showZoidbergModal.value = false
     }, 1800)
@@ -365,12 +452,14 @@ async function loadContributors() {
     error.value = null
     
     console.log('🔄 Loading contributors...')
-    const contributorList = await fetchContributors()
+
+    // ✅ Pass surveyType so the correct Airtable base is used
+    const contributorList = await fetchContributors(surveyType.value)
     contributors.value = contributorList
     
     console.log(`✅ Loaded ${contributorList.length} contributors`)
     
-    const urlContributorId = route.query.contributorId
+    const urlContributorId = route.query.contributorId || route.query.contributorID || route.query.contributorid
     if (urlContributorId) {
       autoSelectContributor(urlContributorId)
     }
@@ -391,8 +480,6 @@ function autoSelectContributor(contributorId) {
     updateWelcomeMessage(contributor.name, surveyType.value)
     checkContributorSurveyStatus(contributorId)
     console.log(`✅ Auto-selected contributor: ${contributor.name} (${contributorId})`)
-
-    // Check if this is the Zoidberg test account
     maybeShowZoidbergModal(contributor)
   } else {
     console.warn(`⚠️ Contributor ID ${contributorId} not found`)
@@ -426,8 +513,6 @@ async function onContributorChange() {
   welcomeMessage.value = ''
   
   const contributor = contributors.value.find(c => c.id === selectedContributorId.value)
-
-  // Check if this is the Zoidberg test account
   if (contributor) {
     maybeShowZoidbergModal(contributor)
   }
@@ -463,6 +548,7 @@ function startSurvey() {
   
   console.log(`🚀 Starting ${surveyDisplayName.value} survey...`)
   
+  // ✅ Use consistent param names that Terms.vue and Review.vue both expect
   const queryParams = {
     contributor: selectedContributorId.value,
     survey: surveyType.value
@@ -483,8 +569,13 @@ onMounted(() => {
   console.log('Survey type from URL:', surveyType.value)
   console.log('Survey display name:', surveyDisplayName.value)
   
+  document.addEventListener('click', handleOutsideClick)
   resetSurveyStore()
   loadContributors()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleOutsideClick)
 })
 </script>
 
@@ -539,7 +630,7 @@ onMounted(() => {
   background: white !important;
   border-radius: 20px !important;
   box-shadow: 0 20px 40px rgba(0,0,0,0.1) !important;
-  overflow: hidden !important;
+  overflow: visible !important;
 }
 
 /* Header */
@@ -548,6 +639,7 @@ onMounted(() => {
   color: white !important;
   padding: 30px !important;
   text-align: center !important;
+  border-radius: 20px 20px 0 0 !important;
 }
 
 .header h1 {
@@ -618,6 +710,100 @@ onMounted(() => {
 .contributor-dropdown:focus {
   outline: none !important;
   border-color: #00274C !important;
+}
+
+/* ── Searchable dropdown ── */
+.contributor-select {
+  margin-bottom: 30px !important;
+  position: relative !important;
+}
+
+.contributor-dropdown {
+  width: 100% !important;
+  padding: 15px !important;
+  border: 2px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  font-size: 1rem !important;
+  background: white !important;
+  cursor: pointer !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  transition: border-color 0.3s ease !important;
+  user-select: none !important;
+  box-sizing: border-box !important;
+}
+.contributor-dropdown:hover,
+.contributor-dropdown.dropdown-open {
+  border-color: #00274C !important;
+}
+.contributor-dropdown .placeholder {
+  color: #a0aec0 !important;
+}
+.dropdown-arrow {
+  font-size: 0.75rem !important;
+  color: #718096 !important;
+  margin-left: 8px !important;
+  flex-shrink: 0 !important;
+}
+.dropdown-panel {
+  position: absolute !important;
+  top: calc(100% + 4px) !important;
+  left: 0 !important;
+  right: 0 !important;
+  background: white !important;
+  border: 2px solid #00274C !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
+  z-index: 1000 !important;
+  overflow: hidden !important;
+}
+.dropdown-search-wrap {
+  padding: 10px 10px 8px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+}
+.dropdown-search {
+  width: 100% !important;
+  padding: 9px 12px !important;
+  border: 2px solid #e2e8f0 !important;
+  border-radius: 7px !important;
+  font-size: 0.95rem !important;
+  outline: none !important;
+  box-sizing: border-box !important;
+  font-family: inherit !important;
+  transition: border-color 0.2s ease !important;
+}
+.dropdown-search:focus {
+  border-color: #00274C !important;
+}
+.dropdown-list {
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 6px 0 !important;
+  max-height: 220px !important;
+  overflow-y: auto !important;
+}
+.dropdown-item {
+  padding: 11px 16px !important;
+  cursor: pointer !important;
+  font-size: 1rem !important;
+  color: #2d3748 !important;
+  transition: background 0.15s ease !important;
+}
+.dropdown-item:hover {
+  background: #edf2f7 !important;
+}
+.dropdown-item.selected {
+  background: #ebf4ff !important;
+  color: #00274C !important;
+  font-weight: 600 !important;
+}
+.dropdown-empty {
+  padding: 14px 16px !important;
+  color: #a0aec0 !important;
+  font-size: 0.95rem !important;
+  text-align: center !important;
 }
 
 /* Survey Status */

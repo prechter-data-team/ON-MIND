@@ -110,18 +110,27 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { searchSynonyms, surveyStore } from '@/storage/storeSurvey.js'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { searchSynonyms, surveyStore, getSurveyConfig } from '@/storage/storeSurvey.js'
 
-// Airtable Configuration
-const AIRTABLE_CONFIG = {
-  apiKey: import.meta.env.VITE_AIRTABLE_API_KEY,
-  baseId: import.meta.env.VITE_AIRTABLE_BASE_ID,
-  tables: {
-    contributors: import.meta.env.VITE_AIRTABLE_TABLE_CONTRIBUTORS,
-    terms: import.meta.env.VITE_AIRTABLE_TABLE_TERMS,
-    responses: import.meta.env.VITE_AIRTABLE_TABLE_RESPONSES,
-    synonyms: import.meta.env.VITE_AIRTABLE_TABLE_SYNONYMS
+// ✅ Dynamically get Airtable config based on the current survey in the store
+function getAirtableConfig() {
+  const config = getSurveyConfig(surveyStore.surveyType)
+  const configKey = config?.airtableConfig || 'default'
+
+  if (configKey === 'default') {
+    return {
+      apiKey:  import.meta.env.VITE_AIRTABLE_API_KEY,
+      baseId:  import.meta.env.VITE_AIRTABLE_BASE_ID,
+      synonymsTable: import.meta.env.VITE_AIRTABLE_TABLE_SYNONYMS
+    }
+  }
+
+  const suffix = configKey.toUpperCase()
+  return {
+    apiKey:  import.meta.env[`VITE_AIRTABLE_API_KEY_${suffix}`],
+    baseId:  import.meta.env[`VITE_AIRTABLE_BASE_ID_${suffix}`],
+    synonymsTable: import.meta.env[`VITE_AIRTABLE_TABLE_SYNONYMS_${suffix}`]
   }
 }
 
@@ -158,10 +167,8 @@ const filteredSynonyms = computed(() => {
   )
 })
 
-// Check if the search query exists in ALL synonyms (not just filtered ones)
 const existsInAllSynonyms = computed(() => {
   if (!searchQuery.value.trim()) return false
-  
   const query = searchQuery.value.toLowerCase().trim()
   return allSynonyms.value.some(synonym => 
     synonym.text && synonym.text.toLowerCase().trim() === query
@@ -173,7 +180,7 @@ const showCreateButton = computed(() => {
          filteredSynonyms.value.length === 0 && 
          !isLoading.value &&
          !isExactMatch.value &&
-         !existsInAllSynonyms.value  // This prevents showing create button for existing synonyms
+         !existsInAllSynonyms.value
 })
 
 const isExactMatch = computed(() => {
@@ -192,7 +199,6 @@ const handleSearch = async () => {
     return
   }
   
-  // Only load if no synonyms loaded yet
   if (allSynonyms.value.length === 0) {
     await loadSynonyms()
   }
@@ -217,11 +223,12 @@ const loadSynonyms = async (forceRefresh = false) => {
                          allSynonyms.value.length === 0 || 
                          (lastLoadTime.value && Date.now() - lastLoadTime.value > 300000)
     
-    if (shouldRefresh && surveyStore && surveyStore.synonymsCache) {
+    if (shouldRefresh && surveyStore?.synonymsCache) {
       surveyStore.synonymsCache.clear()
       console.log('Cleared synonyms cache')
     }
     
+    // searchSynonyms already uses surveyStore.surveyType internally
     const synonyms = await searchSynonyms('')
     allSynonyms.value = synonyms.map(syn => ({
       id: syn.id,
@@ -237,7 +244,6 @@ const loadSynonyms = async (forceRefresh = false) => {
 }
 
 const selectSynonym = (synonym) => {
-  // Mark as existing synonym (from database)
   const synonymWithType = {
     ...synonym,
     isDefault: false,
@@ -257,7 +263,6 @@ const removeSynonym = (synonymId) => {
   emit('update', updatedSynonyms)
 }
 
-// New synonym creation methods
 const openCreateDialog = () => {
   newSynonym.value.text = searchQuery.value.trim()
   newSynonym.value.type = ''
@@ -273,12 +278,10 @@ const createSynonym = async () => {
   if (!canCreateSynonym.value) return
 
   try {
-    // First, save to Airtable
     const airtableRecord = await saveCustomSynonymToAirtable()
     
-    // Create synonym object with the real Airtable ID
     const customSynonym = {
-      id: airtableRecord.id, // Use the real Airtable record ID
+      id: airtableRecord.id,
       text: newSynonym.value.text.trim(),
       type: newSynonym.value.type,
       isDefault: false,
@@ -286,14 +289,11 @@ const createSynonym = async () => {
       isCustom: true
     }
 
-    // Add to selected synonyms
     const updatedSelection = [...props.selectedSynonyms, customSynonym]
     emit('update', updatedSelection)
 
-    // Add to the allSynonyms list so it appears in future searches
     allSynonyms.value.push(customSynonym)
 
-    // Clear search and close dialog
     searchQuery.value = ''
     showDropdown.value = false
     closeCreateDialog()
@@ -306,32 +306,31 @@ const createSynonym = async () => {
   }
 }
 
+// ✅ Now uses dynamic config so custom synonyms save to the right Airtable base
 const saveCustomSynonymToAirtable = async () => {
   try {
-    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.tables.synonyms}`
-    
-    const airtableHeaders = {
-      'Authorization': `Bearer ${AIRTABLE_CONFIG.apiKey}`,
-      'Content-Type': 'application/json'
-    }
+    const { apiKey, baseId, synonymsTable } = getAirtableConfig()
+
+    console.log(`💾 Saving custom synonym to base: ${baseId}, table: ${synonymsTable}`)
+
+    const url = `https://api.airtable.com/v0/${baseId}/${synonymsTable}`
     
     const fieldsToSend = {
       synonymLabel: newSynonym.value.text.trim(),
-      type: [newSynonym.value.type], // Wrap in array for Multiple Select field
+      type: [newSynonym.value.type],
       NeedsReview: true
     }
     
-    // Debug logging
     console.log('Sending to Airtable:', fieldsToSend)
-    console.log('Type value specifically:', `"${newSynonym.value.type}"`, typeof newSynonym.value.type)
     
     const response = await fetch(url, {
       method: 'POST',
-      headers: airtableHeaders,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
-        records: [{
-          fields: fieldsToSend
-        }]
+        records: [{ fields: fieldsToSend }]
       })
     })
 
@@ -344,7 +343,7 @@ const saveCustomSynonymToAirtable = async () => {
     const data = await response.json()
     console.log('✅ Custom synonym saved to Airtable:', data)
     
-    return data.records[0] // Return the created record
+    return data.records[0]
     
   } catch (error) {
     console.error('❌ Error saving custom synonym to Airtable:', error)
@@ -352,7 +351,6 @@ const saveCustomSynonymToAirtable = async () => {
   }
 }
 
-// Hide dropdown when clicking outside
 const handleClickOutside = (event) => {
   if (!event.target.closest('.synonym-selector')) {
     showDropdown.value = false
@@ -362,6 +360,10 @@ const handleClickOutside = (event) => {
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
   await loadSynonyms()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
@@ -551,24 +553,20 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 5px;
-  /* Default fallback color - should not normally be seen */
   background: #6c757d;
   border: 2px solid #495057;
 }
 
-/* Default synonyms (preselected with term) - Blue */
 .synonym-tag.default-synonym {
   background: #007bff;
   border: 2px solid #0056b3;
 }
 
-/* Existing synonyms (selected from database) - Orange */
 .synonym-tag.existing-synonym {
   background: #fd7e14;
   border: 2px solid #e8590c;
 }
 
-/* Custom synonyms (created by user) - Purple */
 .synonym-tag.custom-synonym {
   background: #6f42c1;
   border: 2px solid #5a2d91;
@@ -593,7 +591,6 @@ onMounted(async () => {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* Dialog Styles */
 .dialog-overlay {
   position: fixed;
   top: 0;
